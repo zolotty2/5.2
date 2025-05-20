@@ -1,156 +1,224 @@
-﻿using Microsoft.EntityFrameworkCore;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Reflection.Emit;
-
-namespace CompanyApp
+﻿class Program
 {
-    public class Department
+    static void Main(string[] args)
     {
-        public int Id { get; set; }
-        public string Name { get; set; }
-        public List<Position> Positions { get; set; } = new();
+        // Инициализация базы данных
+        InitializeDatabase();
+
+        Console.WriteLine("Демонстрация различных способов загрузки связанных данных:");
+
+        // 1. Eager Loading (метод Include)
+        Console.WriteLine("\n1. Eager Loading (метод Include):");
+        EagerLoadingExample();
+
+        // 2. Explicit Loading (явная загрузка)
+        Console.WriteLine("\n2. Explicit Loading (явная загрузка):");
+        ExplicitLoadingExample();
+
+        // 3. Lazy Loading (ленивая загрузка)
+        Console.WriteLine("\n3. Lazy Loading (ленивая загрузка):");
+        LazyLoadingExample();
     }
 
-    public class Position
+    static void InitializeDatabase()
     {
-        public int Id { get; set; }
-        public string Title { get; set; }
-        public int DepartmentId { get; set; }
-        public Department Department { get; set; }
-        public List<Employee> Employees { get; set; } = new();
-    }
-
-    public class Employee
-    {
-        public int Id { get; set; }
-        public string Name { get; set; }
-        public int PositionId { get; set; }
-        public Position Position { get; set; }
-    }
-
-    public class CompanyContext : DbContext
-    {
-        public DbSet<Department> Departments { get; set; }
-        public DbSet<Position> Positions { get; set; }
-        public DbSet<Employee> Employees { get; set; }
-
-        protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+        using (var context = new CompanyContext())
         {
-            optionsBuilder.UseSqlServer("Server=(localdb)\\mssqllocaldb;Database=CompanyDB;Trusted_Connection=True;");
-        }
-
-        protected override void OnModelCreating(ModelBuilder modelBuilder)
-        {
-            modelBuilder.Entity<Department>()
-                .HasMany(d => d.Positions)
-                .WithOne(p => p.Department)
-                .HasForeignKey(p => p.DepartmentId);
-
-            modelBuilder.Entity<Position>()
-                .HasMany(p => p.Employees)
-                .WithOne(e => e.Position)
-                .HasForeignKey(e => e.PositionId);
-        }
-    }
-
-    class Program
-    {
-        static void Main()
-        {
-            using var context = new CompanyContext();
+            context.Database.EnsureDeleted();
             context.Database.EnsureCreated();
 
-            while (true)
-            {
-                Console.WriteLine("\n1. Добавить отдел\n2. Добавить должность\n3. Добавить сотрудника\n4. Показать данные\n5. Выход");
-                var choice = Console.ReadLine();
+            // Создаем отделы
+            var devDepartment = new Department { Name = "Отдел разработки" };
+            var designDepartment = new Department { Name = "Отдел дизайна" };
 
-                switch (choice)
-                {
-                    case "1":
-                        AddDepartment(context);
-                        break;
-                    case "2":
-                        AddPosition(context);
-                        break;
-                    case "3":
-                        AddEmployee(context);
-                        break;
-                    case "4":
-                        DisplayData(context);
-                        break;
-                    case "5":
-                        return;
-                }
+            // Создаем должности
+            var csharpPosition = new Position { Title = "Разработчик на C#", Department = devDepartment };
+            var javaPosition = new Position { Title = "Разработчик на Java", Department = devDepartment };
+            var uiDesignerPosition = new Position { Title = "Дизайнер интерфейсов", Department = designDepartment };
+
+            // Создаем сотрудников
+            var emp1 = new Employee { Name = "Иван Иванов", Email = "ivan@example.com", Position = csharpPosition };
+            var emp2 = new Employee { Name = "Петр Петров", Email = "petr@example.com", Position = csharpPosition };
+            var emp3 = new Employee { Name = "Сидор Сидоров", Email = "sidor@example.com", Position = javaPosition };
+            var emp4 = new Employee { Name = "Анна Архипова", Email = "anna@example.com", Position = uiDesignerPosition };
+
+            context.AddRange(devDepartment, designDepartment);
+            context.AddRange(csharpPosition, javaPosition, uiDesignerPosition);
+            context.AddRange(emp1, emp2, emp3, emp4);
+
+            context.SaveChanges();
+        }
+    }
+
+    static void EagerLoadingExample()
+    {
+        using (var context = new CompanyContext())
+        {
+            // Загружаем сотрудников вместе с должностями и отделами
+            var employees = context.Employees
+                .Include(e => e.Position)
+                    .ThenInclude(p => p.Department)
+                .ToList();
+
+            foreach (var emp in employees)
+            {
+                Console.WriteLine($"Сотрудник: {emp.Name}, Email: {emp.Email}");
+                Console.WriteLine($"Должность: {emp.Position.Title}");
+                Console.WriteLine($"Отдел: {emp.Position.Department.Name}");
+                Console.WriteLine();
             }
         }
+    }
 
-        static void AddDepartment(CompanyContext context)
+    static void ExplicitLoadingExample()
+    {
+        using (var context = new CompanyContext())
         {
-            Console.Write("Название отдела: ");
-            var name = Console.ReadLine();
-            context.Departments.Add(new Department { Name = name });
+            // Загружаем сотрудника без связанных данных
+            var employee = context.Employees.First();
+            Console.WriteLine($"Сотрудник: {employee.Name}, Email: {employee.Email}");
+
+            // Явно загружаем должность
+            context.Entry(employee)
+                .Reference(e => e.Position)
+                .Load();
+
+            Console.WriteLine($"Должность: {employee.Position.Title}");
+
+            // Явно загружаем отдел через должность
+            context.Entry(employee.Position)
+                .Reference(p => p.Department)
+                .Load();
+
+            Console.WriteLine($"Отдел: {employee.Position.Department.Name}");
+        }
+    }
+
+    static void LazyLoadingExample()
+    {
+        using (var context = new CompanyContext())
+        {
+            // Загружаем сотрудника без связанных данных
+            var employee = context.Employees.First();
+            Console.WriteLine($"Сотрудник: {employee.Name}, Email: {employee.Email}");
+
+            // Ленивая загрузка сработает при первом обращении к навигационному свойству
+            Console.WriteLine($"Должность: {employee.Position.Title}");
+
+            // Ленивая загрузка для отдела через должность
+            Console.WriteLine($"Отдел: {employee.Position.Department.Name}");
+        }
+    }
+}
+class Program
+{
+    static void Main(string[] args)
+    {
+        // Инициализация базы данных
+        InitializeDatabase();
+
+        Console.WriteLine("Демонстрация различных способов загрузки связанных данных:");
+
+        // 1. Eager Loading (метод Include)
+        Console.WriteLine("\n1. Eager Loading (метод Include):");
+        EagerLoadingExample();
+
+        // 2. Explicit Loading (явная загрузка)
+        Console.WriteLine("\n2. Explicit Loading (явная загрузка):");
+        ExplicitLoadingExample();
+
+        // 3. Lazy Loading (ленивая загрузка)
+        Console.WriteLine("\n3. Lazy Loading (ленивая загрузка):");
+        LazyLoadingExample();
+    }
+
+    static void InitializeDatabase()
+    {
+        using (var context = new CompanyContext())
+        {
+            context.Database.EnsureDeleted();
+            context.Database.EnsureCreated();
+
+            // Создаем отделы
+            var devDepartment = new Department { Name = "Отдел разработки" };
+            var designDepartment = new Department { Name = "Отдел дизайна" };
+
+            // Создаем должности
+            var csharpPosition = new Position { Title = "Разработчик на C#", Department = devDepartment };
+            var javaPosition = new Position { Title = "Разработчик на Java", Department = devDepartment };
+            var uiDesignerPosition = new Position { Title = "Дизайнер интерфейсов", Department = designDepartment };
+
+            // Создаем сотрудников
+            var emp1 = new Employee { Name = "Иван Иванов", Email = "ivan@example.com", Position = csharpPosition };
+            var emp2 = new Employee { Name = "Петр Петров", Email = "petr@example.com", Position = csharpPosition };
+            var emp3 = new Employee { Name = "Сидор Сидоров", Email = "sidor@example.com", Position = javaPosition };
+            var emp4 = new Employee { Name = "Анна Архипова", Email = "anna@example.com", Position = uiDesignerPosition };
+
+            context.AddRange(devDepartment, designDepartment);
+            context.AddRange(csharpPosition, javaPosition, uiDesignerPosition);
+            context.AddRange(emp1, emp2, emp3, emp4);
+
             context.SaveChanges();
         }
+    }
 
-        static void AddPosition(CompanyContext context)
+    static void EagerLoadingExample()
+    {
+        using (var context = new CompanyContext())
         {
-            Console.WriteLine("Доступные отделы:");
-            foreach (var d in context.Departments)
-                Console.WriteLine($"{d.Id}. {d.Name}");
+            // Загружаем сотрудников вместе с должностями и отделами
+            var employees = context.Employees
+                .Include(e => e.Position)
+                    .ThenInclude(p => p.Department)
+                .ToList();
 
-            Console.Write("ID отдела: ");
-            var departmentId = int.Parse(Console.ReadLine());
-
-            Console.Write("Название должности: ");
-            var title = Console.ReadLine();
-
-            context.Positions.Add(new Position
+            foreach (var emp in employees)
             {
-                Title = title,
-                DepartmentId = departmentId
-            });
-            context.SaveChanges();
-        }
-
-        static void AddEmployee(CompanyContext context)
-        {
-            Console.WriteLine("Доступные должности:");
-            foreach (var p in context.Positions.Include(p => p.Department))
-                Console.WriteLine($"{p.Id}. {p.Title} ({p.Department.Name})");
-
-            Console.Write("ID должности: ");
-            var positionId = int.Parse(Console.ReadLine());
-
-            Console.Write("Имя сотрудника: ");
-            var name = Console.ReadLine();
-
-            context.Employees.Add(new Employee
-            {
-                Name = name,
-                PositionId = positionId
-            });
-            context.SaveChanges();
-        }
-
-        static void DisplayData(CompanyContext context)
-        {
-            var departments = context.Departments
-                .Include(d => d.Positions)
-                .ThenInclude(p => p.Employees);
-
-            foreach (var d in departments)
-            {
-                Console.WriteLine($"\nОтдел: {d.Name}");
-                foreach (var p in d.Positions)
-                {
-                    Console.WriteLine($"  Должность: {p.Title}");
-                    foreach (var e in p.Employees)
-                        Console.WriteLine($"    Сотрудник: {e.Name}");
-                }
+                Console.WriteLine($"Сотрудник: {emp.Name}, Email: {emp.Email}");
+                Console.WriteLine($"Должность: {emp.Position.Title}");
+                Console.WriteLine($"Отдел: {emp.Position.Department.Name}");
+                Console.WriteLine();
             }
+        }
+    }
+
+    static void ExplicitLoadingExample()
+    {
+        using (var context = new CompanyContext())
+        {
+            // Загружаем сотрудника без связанных данных
+            var employee = context.Employees.First();
+            Console.WriteLine($"Сотрудник: {employee.Name}, Email: {employee.Email}");
+
+            // Явно загружаем должность
+            context.Entry(employee)
+                .Reference(e => e.Position)
+                .Load();
+
+            Console.WriteLine($"Должность: {employee.Position.Title}");
+
+            // Явно загружаем отдел через должность
+            context.Entry(employee.Position)
+                .Reference(p => p.Department)
+                .Load();
+
+            Console.WriteLine($"Отдел: {employee.Position.Department.Name}");
+        }
+    }
+
+    static void LazyLoadingExample()
+    {
+        using (var context = new CompanyContext())
+        {
+            // Загружаем сотрудника без связанных данных
+            var employee = context.Employees.First();
+            Console.WriteLine($"Сотрудник: {employee.Name}, Email: {employee.Email}");
+
+            // Ленивая загрузка сработает при первом обращении к навигационному свойству
+            Console.WriteLine($"Должность: {employee.Position.Title}");
+
+            // Ленивая загрузка для отдела через должность
+            Console.WriteLine($"Отдел: {employee.Position.Department.Name}");
         }
     }
 }
